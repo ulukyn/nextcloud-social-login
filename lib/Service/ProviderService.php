@@ -426,11 +426,11 @@ class ProviderService
         if ($provider === 'telegram') {
             $provider = 'tg'; //For backward compatibility
         }
-        $uid = $provider.'-'.$profileId;
+        $uid = $profileId;
         if (strlen($uid) > 64 || !preg_match('#^[a-z0-9_.@-]+$#i', $profileId)) {
-            $uid = $provider.'-'.md5($profileId);
+            $uid = md5($profileId);
         }
-        return $this->login($uid, $profile, $provider.'-');
+        return $this->login($uid, $profile, '');
     }
 
     private function login($uid, Profile $profile, $newGroupPrefix = '')
