@@ -47,24 +47,27 @@
           </select>
         </label>
         <br/>
-        <template v-if="provData.hasGroupMapping">
-          <button class="group-mapping-add" type="button" @click="provider.groupMapping.push({foreign: '', local: ''})">
-            {{ t(appName, 'Add group mapping') }}
-          </button>
-          <div v-for="(mapping, mappingIdx) in provider.groupMapping" :key="mapping">
-            <input type="text" class="foreign-group" v-model="mapping.foreign" />
-            <select class="local-group" :name="mapping.foreign ? 'custom_providers['+provType+']['+k+'][groupMapping]['+mapping.foreign+']' : ''">
-              <option v-for="group in groups" :key="group" :value="group" :selected="mapping.local === group">
-                {{ group }}
-              </option>
-            </select>
-            <span class="group-mapping-remove" @click="provider.groupMapping.splice(mappingIdx, 1)">x</span>
-          </div>
-        </template>
+        <GroupMapping v-if="provData.hasGroupMapping"
+          :groups="groups"
+          :group-mapping="provider.groupMapping"
+          :input-name-prefix="'custom_providers['+provType+']['+k+'][groupMapping]'"
+          @add="provider.groupMapping.push({foreign: '', local: ''})"
+          @remove="provider.groupMapping.splice($event, 1)"
+        />
       </div>
     </div>
-    <hr/><br/>
-    <div class="provider-settings" v-for="(provider, name) in providers" :key="name">
+    <hr/>
+    <div v-if="defaultProvidersList.length">
+      <br/>
+      <select v-model="addVisibleName" @change="defaultVisible.push(addVisibleName); addVisibleName = null;">
+        <option disabled hidden :value="null">{{ t(appName, 'Add default provider') }}</option>
+        <option v-for="p in defaultProvidersList" :key="p.name" :value="p.name" >
+          {{ p.title }}
+        </option>
+      </select>
+    </div>
+    <br/>
+    <div class="provider-settings" v-for="(provider, name) in defaultProviders" :key="name">
       <h2 class="provider-title">
         <img :src="imagePath(name.toLowerCase())" /> {{ name[0].toUpperCase() + name.substring(1) }}
       </h2>
@@ -120,6 +123,13 @@
           <input type="text" :name="'providers['+name+'][guilds]'" v-model="provider.guilds"/>
         </label>
       </template>
+      <GroupMapping v-if="provider.groupMapping"
+        :groups="groups"
+        :group-mapping="provider.groupMapping"
+        :input-name-prefix="'providers['+name+'][groupMapping]'"
+        @add="provider.groupMapping.push({foreign: '', local: ''})"
+        @remove="provider.groupMapping.splice($event, 1)"
+      />
     </div>
     <br/>
 
@@ -130,15 +140,18 @@
 <script>
 import { imagePath } from '@nextcloud/router'
 import axios from '@nextcloud/axios'
+import GroupMapping from './settings/GroupMapping.vue'
 import optionsTitles from './settings/options-titles'
 import providerTypes from './settings/provider-types'
 import styleClass from './settings/style-class'
 import { appName, showError, showInfo } from '../common'
 
 export default {
+  components: { GroupMapping },
   data: function () {
-    var settingsEl = document.getElementById('sociallogin')
-    var data = JSON.parse(settingsEl.dataset.settings)
+    const settingsEl = document.getElementById('sociallogin')
+    const data = JSON.parse(settingsEl.dataset.settings)
+    const hasGroupMapping = ['discord']
 
     data.optionsTitles = optionsTitles
     data.providerTypes = providerTypes
@@ -148,25 +161,45 @@ export default {
       data.custom_providers = {}
     }
 
-    for (var provType in providerTypes) {
+    const convertGroupMapping = (provider) => {
+      const groupMappingArr = []
+      const groupMapping = provider.groupMapping
+      if (groupMapping) {
+        for (const foreignGroup in groupMapping) {
+          groupMappingArr.push({foreign: foreignGroup, local: groupMapping[foreignGroup]})
+        }
+      }
+      provider.groupMapping = groupMappingArr
+    }
+    for (const provType in providerTypes) {
       if (!data.custom_providers[provType]) {
         data.custom_providers[provType] = []
       }
       if (providerTypes[provType].hasGroupMapping) {
-        for (var k = 0; k < data.custom_providers[provType].length; ++k) {
-          var groupMappingArr = []
-          var groupMapping = data.custom_providers[provType][k].groupMapping
-          if (groupMapping) {
-            for (var foreignGroup in groupMapping) {
-              groupMappingArr.push({foreign: foreignGroup, local: groupMapping[foreignGroup]})
-            }
-          }
-          data.custom_providers[provType][k].groupMapping = groupMappingArr
-        }
+        data.custom_providers[provType].forEach((p) => convertGroupMapping(p))
       }
     }
-    data.appName = appName
+    hasGroupMapping.forEach((provName) => convertGroupMapping(data.providers[provName]))
+
+    data.addVisibleName = null
+    data.defaultVisible = Object.keys(data.providers).filter((name) => !!data.providers[name].appid)
     return data
+  },
+  computed: {
+    defaultProviders: function () {
+      const providers = Object.assign({}, this.providers)
+      for (const k in providers) {
+        if (!providers[k].appid && !this.defaultVisible.includes(k)) {
+          delete providers[k]
+        }
+      }
+      return providers
+    },
+    defaultProvidersList: function () {
+      return Object.keys(this.providers)
+        .map((name) => ({ name, title: name[0].toUpperCase() + name.substring(1) }))
+        .filter((p) => !this.defaultProviders[p.name] && !this.defaultVisible.includes(p.name))
+    },
   },
   mounted: function () {
     var disableReg = document.getElementById('opt_disable_registration')
@@ -179,7 +212,6 @@ export default {
     disableReg.onchange()
   },
   methods: {
-    test(e) {console.log(e)},
     imagePath: function (file) {
       return imagePath(appName, file)
     },
@@ -193,6 +225,7 @@ export default {
                 vm.custom_providers[provType][i].isNew = false
               }
             }
+            vm.defaultVisible = Object.keys(vm.providers).filter((name) => !!vm.providers[name].appid)
             showInfo(vm.t(appName, 'Settings for social login successfully saved'))
           } else {
             showError(res.data.message)
@@ -256,10 +289,6 @@ export default {
     width: 20px;
     text-align: center;
   }
-  .provider-settings .group-mapping-remove {
-    cursor: pointer;
-    font-weight: bold;
-  }
   input[readonly] {
     background-color: #ebebeb;
     color: rgba(0, 0, 0, 0.4);
@@ -271,11 +300,5 @@ export default {
     width: 20px;
     height: 20px;
     margin-bottom: -2px;
-  }
-  .group-mapping-add {
-    width: 100%;
-  }
-  .foreign-group, .local-group {
-    width: 133px;
   }
 </style>
