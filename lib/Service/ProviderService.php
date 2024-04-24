@@ -44,6 +44,7 @@ class ProviderService
         'button_text_wo_prefix',
     ];
     const DEFAULT_PROVIDERS = [
+        'apple',
         'google',
         'amazon',
         'facebook',
@@ -78,6 +79,10 @@ class ProviderService
             'keys' => [
                 'id' => 'appid',
                 'secret' => 'secret',
+                // Apple below
+                'team_id' => 'teamId',
+                'key_id' => 'keyId',
+                'key_content' => 'keyContent',
             ],
         ],
         self::TYPE_OPENID => [
@@ -243,7 +248,7 @@ class ProviderService
                         'callback' => $callbackUrl,
                         'default_group' => $prov['defaultGroup'],
                     ], $this->applyConfigMapping('default', $prov));
-                    $opts = ['orgs', 'workspace', 'guilds', 'groupMapping'];
+                    $opts = ['orgs', 'workspace', 'guilds', 'groupMapping', 'useGuildNames'];
                     foreach ($opts as $opt) {
                         if (isset($prov[$opt])) {
                             $config[$opt] = $prov[$opt];
@@ -409,13 +414,19 @@ class ProviderService
             $checkGuilds = function () use ($allowedGuilds, $userGuilds, $config) {
                 foreach ($userGuilds as $guild) {
                     if (in_array($guild->id ?? null, $allowedGuilds)) {
-                        return;
+                        return $guild->id;
                     }
                 }
                 $this->storage->clear();
                 throw new LoginException($this->l->t('Login is available only to members of the following Discord guilds: %s', $config['guilds']));
             };
-            $checkGuilds();
+            $matchingGuildId = $checkGuilds();
+
+            // Use discord guild member nickname as display name
+            if (!empty($config['useGuildNames']) && $matchingGuildId) {
+                $guildMember = $adapter->apiRequest('users/@me/guilds/' . $matchingGuildId . '/member' );
+                $profile->displayName = $guildMember->nick ?? $profile->displayName;
+            }
 
             if ($allowedGuilds && !empty($config['groupMapping'])) {
                 // read Discord roles into NextCloud groups
@@ -499,7 +510,7 @@ class ProviderService
             ) {
                 throw new LoginException($this->l->t('Email already registered'));
             }
-            $userPassword = substr(base64_encode(random_bytes(64)), 0, 30);
+            $userPassword = '1@aA'.substr(base64_encode(random_bytes(64)), 0, 30);
             $user = $this->userManager->createUser($uid, $userPassword);
 
             if ($this->config->getAppValue($this->appName, 'create_disabled_users')) {
